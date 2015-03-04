@@ -1,10 +1,10 @@
 module Blackjack where
 
-import State
+--import State
 
 import System.Random
 import Control.Monad
-import Control.Monad.State (liftIO, foldM, StateT, runStateT, get, put)
+import Control.Monad.State (liftIO, foldM, StateT, runStateT, get, put, State, state, runState)
 import qualified Data.Map as M
 import Data.Time.LocalTime
 import Data.Traversable
@@ -50,20 +50,13 @@ data GameState = GameState
     , boughtInsurance :: Bool
     } deriving Show
 
-hitAction :: String
-hitAction = "hit"
-
-stayAction :: String
-stayAction = "stay"
-
-doubleDownAction :: String
-doubleDownAction = "dd"
-
-splitAction :: String
-splitAction = "split"
-
-foldAction :: String
-foldAction = "fold"
+data GameAction
+    = Hit
+    | Stay
+    | DoubleDown
+    | Split
+    | Fold
+    deriving (Eq, Read, Show)
 
 
 ---------------
@@ -73,10 +66,10 @@ foldAction = "fold"
 io :: IO a -> StateT GameState IO a
 io = liftIO
 
-randomRSt :: (RandomGen g, Random a) => (a, a) -> StateTransition g a
-randomRSt p = StateTransition $ randomR p
+randomRSt :: (RandomGen g, Random a) => (a, a) -> State g a
+randomRSt p = state $ randomR p
 
-shuffledSingleDeck :: StateTransition StdGen Deck
+shuffledSingleDeck :: State StdGen Deck
 shuffledSingleDeck = fisherYates allCards
 
 -- XXX this is actually foldM
@@ -84,7 +77,7 @@ foldlM :: Monad m => (b -> a -> m b) -> b -> [a] -> m b
 foldlM _ b [] = return b
 foldlM f b (x:xs) = (f b x) >>= (\nextB -> foldlM f nextB xs)
 
-fisherYates :: [a] -> StateTransition StdGen [a]
+fisherYates :: [a] -> State StdGen [a]
 fisherYates [] = return []
 fisherYates (x:xs) =
     fmap M.elems $ foldM fisherYatesStep (initial x) (numerate xs)
@@ -92,7 +85,7 @@ fisherYates (x:xs) =
     numerate = zip [1..]
     initial k = M.singleton 0 k
 
-    fisherYatesStep :: M.Map Int a -> (Int, a) -> StateTransition StdGen (M.Map Int a)
+    fisherYatesStep :: M.Map Int a -> (Int, a) -> State StdGen (M.Map Int a)
     fisherYatesStep m (i, x) = fmap (\j -> M.insert j x . M.insert i (m M.! j) $ m) $ randomRSt (0, i)
 
 hasValueTen :: Value -> Bool
@@ -117,6 +110,7 @@ handValue ((Card _ f):h')
 didExplode :: Hand -> Bool
 didExplode h = (handValue h) > 21
 
+-- cannot double down after split
 canDoubleDown :: [Hand] -> Bool
 canDoubleDown (((Card _ _):(Card _ _):[]):[]) = True
 canDoubleDown _ = False
@@ -129,7 +123,7 @@ nextTurn :: Turn -> Turn
 nextTurn Dealer = Player
 nextTurn Player = Dealer
 
-gameSt :: StateTransition StdGen GameState
+gameSt :: State StdGen GameState
 gameSt = fmap (\d -> GameState [] [[]] d Dealer False) shuffledSingleDeck
 
 drawCard :: StateT GameState IO (Maybe Card)
@@ -183,11 +177,12 @@ playPlayer = do
     playHand h = do
         io . putStrLn $ "Playing hand " ++ (show h)
         io $ putStr "Your move [hit stay dd split fold]> "
-        (io getLine) >>= processInput
+        -- XXX read sucks. it can throw exceptions, which are unidiomatic.
+        (fmap read $ io getLine) >>= processInput
         where
-        processInput :: String -> StateT GameState IO Hand
-        processInput s
-            | s == hitAction = do
+        processInput :: GameAction -> StateT GameState IO Hand
+        processInput ga = case ga of
+            Hit -> do
                 mc <- drawCard
                 case mc of
                     Just c -> do
@@ -201,36 +196,25 @@ playPlayer = do
                     Nothing -> do
                         io . putStrLn $ "Deck ran out of cards!"
                         return h
-            | s == stayAction = return h
-            | s == doubleDownAction = do
+            Stay -> return h
+            DoubleDown -> do  -- hit + (stay if hand did not explode)
                 (GameState _ ph _ _ _) <- get
                 case canDoubleDown ph of
                     True -> do
-                        mc <- drawCard
-                        case mc of
-                            Just c -> do
-                                io . putStrLn $ "Player got a " ++ (show c)
-                                let h' = c:h
-                                case didExplode h' of
-                                    True -> do
-                                        io . putStrLn $ "You Lose!"
-                                        return []
-                                    False -> return h'
-                            Nothing -> do
-                                io $ putStrLn "Deck ran out of cards!"
-                                return h
+                        processInput Hit
+                        processInput Stay
                     False -> do
                         io $ putStrLn "Can't double down"
                         playHand h
-            | s == splitAction = do --TODO
+            Split -> do --TODO
                 (GameState _ ph _ _ _) <- get
                 case canSplit h of
                     True -> return h
                     False -> return h
-            | s == foldAction = do
+            Fold -> do
                 io $ putStrLn "You lose."
                 return []
-            | otherwise = (io $ putStrLn "Invalid input") >> playHand h
+            --_ -> (io . putStrLn $ "Invalid input " ++ (show ga)) >> playHand h
 
 play :: StateT GameState IO ()
 play = do
