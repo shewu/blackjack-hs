@@ -30,15 +30,15 @@ data Value
 data Card = Card
     { suit :: Suit
     , value :: Value
-    } deriving Show
+    } deriving (Eq, Show)
 
 type Hand = [Card]
 type Deck = [Card]
 
 allCards :: Deck
-allCards = [Card s v | s <- [Spade, Heart, Diamond, Club]
-                     , v <- [Ace, Two, Three, Four, Five, Six, Seven, Eight, Nine, Ten, Jack, Queen, King]
-           ]
+allCards = [Card s v | v <- [Ace, Two, Three, Four, Five, Six, Seven, Eight, Nine, Ten, Jack, Queen, King]
+                     , s <- [Spade, Heart, Diamond, Club]
+                     ]
 
 data Turn = Dealer | Player deriving Show
 
@@ -58,6 +58,11 @@ data GameAction
     | Fold
     deriving (Eq, Read, Show)
 
+data Outcome
+    = Win
+    | Lose
+    | Tie
+    deriving (Eq, Show)
 
 ---------------
 -- functions --
@@ -70,7 +75,8 @@ randomRSt :: (RandomGen g, Random a) => (a, a) -> State g a
 randomRSt p = state $ randomR p
 
 shuffledSingleDeck :: State StdGen Deck
-shuffledSingleDeck = fisherYates allCards
+--shuffledSingleDeck = fisherYates allCards
+shuffledSingleDeck = return allCards
 
 -- XXX this is actually foldM
 foldlM :: Monad m => (b -> a -> m b) -> b -> [a] -> m b
@@ -126,6 +132,16 @@ nextTurn Player = Dealer
 gameSt :: State StdGen GameState
 gameSt = fmap (\d -> GameState [] [[]] d Dealer False) shuffledSingleDeck
 
+compareHands :: Hand -> [Hand] -> [Outcome]
+compareHands dh phs = let dhv = handValue dh in
+    map (\h -> let hv = handValue h in
+        if dhv > hv
+            then Lose
+            else if dhv < hv
+                then Win
+                else Tie
+    ) phs
+
 drawCard :: StateT GameState IO (Maybe Card)
 drawCard = do
     (GameState dh ph d t ins) <- get
@@ -150,7 +166,7 @@ playDealer = do
             True -> do io $ putStrLn "Dealer exploded! You win."
                        return ()
             False -> do io . putStrLn $ "Dealer's hand is " ++ (show dh)
-                        return ()
+                        return ()  -- TODO compare hands
         False -> playDealer
     where
     dealerStop h = (handValue h) >= 17
@@ -168,10 +184,15 @@ dealPlayer = do
 playPlayer :: StateT GameState IO ()
 playPlayer = do
     (GameState _ ph _ _ _) <- get
-    ph' <- traverse playHand ph
+    ph' <- traverse playHand ph  --XXX still not sure how to append to ph
     (GameState dh _ d t ins) <- get
     put $ GameState dh ph' d t ins
-    return ()
+    case all (== []) ph' of
+        True -> do
+            io $ putStrLn "Player lost. Dealer wins!"
+        False -> do
+            io $ putStrLn "Dealer's turn."
+            playDealer
     where
     playHand :: Hand -> StateT GameState IO Hand
     playHand h = do
@@ -190,29 +211,40 @@ playPlayer = do
                         let h' = c:h
                         case didExplode h' of
                             True -> do
-                                io $ putStrLn "You lose!"
+                                io . putStrLn $ "The current hand " ++ (show h') ++ " loses."
                                 return []
                             False -> playHand h'
                     Nothing -> do
                         io . putStrLn $ "Deck ran out of cards!"
                         return h
             Stay -> return h
-            DoubleDown -> do  -- hit + (stay if hand did not explode)
+            DoubleDown -> do
                 (GameState _ ph _ _ _) <- get
                 case canDoubleDown ph of
                     True -> do
-                        processInput Hit
-                        processInput Stay
+                        h' <- processInput Hit
+                        if h' == []
+                            then return []
+                            else processInput Stay
                     False -> do
                         io $ putStrLn "Can't double down"
                         playHand h
             Split -> do --TODO
                 (GameState _ ph _ _ _) <- get
                 case canSplit h of
-                    True -> return h
-                    False -> return h
+                    True -> do
+                        Just c1 <- drawCard
+                        Just c2 <- drawCard
+                        (GameState dh _ d t ins) <- get
+                        let sc = head h  -- despite head, this is safe becaause of canSplit
+                        let ph' = ph ++ [(sc:c2:[])]
+                        put $ GameState dh ph' d t ins
+                        return (sc:c1:[])
+                    False -> do
+                        io $ putStrLn "Can't split"
+                        playHand h
             Fold -> do
-                io $ putStrLn "You lose."
+                io . putStrLn $ "The current hand " ++ (show h) ++ " loses."
                 return []
             --_ -> (io . putStrLn $ "Invalid input " ++ (show ga)) >> playHand h
 
@@ -225,11 +257,11 @@ play = do
     dealPlayer >>= (\(Just c) -> io . putStrLn $ "Player got a " ++ (show c))
     giveDealer >>= (\(Just c) -> io . putStrLn $ "Dealer got a " ++ (show c))
     dealPlayer >>= (\(Just c) -> io . putStrLn $ "Player got a " ++ (show c))
-    playPlayer >> playDealer
+    playPlayer
     where
     needsInsurance :: Maybe Card -> StateT GameState IO ()
     needsInsurance mc@(Just (Card _ Ace)) = do
-        io $ putStr "Do you want insurance? (y/n)"
+        io $ putStr "Do you want insurance? (y/n)> "
         inp <- io getLine
         case inp of
             "y" -> do (GameState dh ph cs t ins) <- get
