@@ -176,7 +176,7 @@ playPlayer = do
     playHand :: Hand -> StateT GameState IO Hand
     playHand h = do
         io . putStrLn $ "Playing hand " ++ (show h)
-        io $ putStr "Your move [hit stay dd split fold]> "
+        io $ putStr "Your move [Hit Stay DoubleDown Split Fold]> "
         -- XXX read sucks. it can throw exceptions, which are unidiomatic.
         (fmap read $ io getLine) >>= processInput
         where
