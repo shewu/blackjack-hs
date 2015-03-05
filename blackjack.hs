@@ -79,11 +79,6 @@ shuffledSingleDeck :: State StdGen Deck
 --shuffledSingleDeck = fisherYates allCards
 shuffledSingleDeck = return allCards
 
--- XXX this is actually foldM
-foldlM :: Monad m => (b -> a -> m b) -> b -> [a] -> m b
-foldlM _ b [] = return b
-foldlM f b (x:xs) = (f b x) >>= (\nextB -> foldlM f nextB xs)
-
 fisherYates :: [a] -> State StdGen [a]
 fisherYates [] = return []
 fisherYates (x:xs) =
