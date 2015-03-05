@@ -2,12 +2,13 @@ module Blackjack where
 
 --import State
 
-import System.Random
+import Control.Applicative
 import Control.Monad
 import Control.Monad.State (liftIO, foldM, StateT, runStateT, get, put, State, state, runState)
 import qualified Data.Map as M
 import Data.Time.LocalTime
 import Data.Traversable
+import System.Random
 
 
 data Suit = Spade | Heart | Diamond | Club deriving (Eq, Show)
@@ -86,13 +87,13 @@ foldlM f b (x:xs) = (f b x) >>= (\nextB -> foldlM f nextB xs)
 fisherYates :: [a] -> State StdGen [a]
 fisherYates [] = return []
 fisherYates (x:xs) =
-    fmap M.elems $ foldM fisherYatesStep (initial x) (numerate xs)
+    M.elems <$> foldM fisherYatesStep (initial x) (numerate xs)
     where
     numerate = zip [1..]
     initial k = M.singleton 0 k
 
     fisherYatesStep :: M.Map Int a -> (Int, a) -> State StdGen (M.Map Int a)
-    fisherYatesStep m (i, x) = fmap (\j -> M.insert j x . M.insert i (m M.! j) $ m) $ randomRSt (0, i)
+    fisherYatesStep m (i, x) = (\j -> M.insert j x . M.insert i (m M.! j) $ m) <$> randomRSt (0, i)
 
 hasValueTen :: Value -> Bool
 hasValueTen v = 10 <= (fromEnum v) + 1
@@ -130,7 +131,7 @@ nextTurn Dealer = Player
 nextTurn Player = Dealer
 
 gameSt :: State StdGen GameState
-gameSt = fmap (\d -> GameState [] [[]] d Dealer False) shuffledSingleDeck
+gameSt = (\d -> GameState [] [[]] d Dealer False) <$> shuffledSingleDeck
 
 compareHands :: Hand -> [Hand] -> [Outcome]
 compareHands dh phs = let dhv = handValue dh in
@@ -199,7 +200,7 @@ playPlayer = do
         io . putStrLn $ "Playing hand " ++ (show h)
         io $ putStr "Your move [Hit Stay DoubleDown Split Fold]> "
         -- XXX read sucks. it can throw exceptions, which are unidiomatic.
-        (fmap read $ io getLine) >>= processInput
+        (read <$> io getLine) >>= processInput
         where
         processInput :: GameAction -> StateT GameState IO Hand
         processInput ga = case ga of
