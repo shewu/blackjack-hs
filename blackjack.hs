@@ -1,7 +1,8 @@
+{-# LANGUAGE TemplateHaskell #-}
+
 module Blackjack where
 
---import State
-
+import Control.Lens
 import Control.Applicative
 import Control.Monad
 import Control.Monad.State (liftIO, foldM, StateT, runStateT, get, put, State, state, runState)
@@ -37,6 +38,7 @@ type Hand = [Card]
 type Deck = [Card]
 
 allCards :: Deck
+-- XXX would be nice if i can get ALL of a data
 allCards = [Card s v | v <- [Ace, Two, Three, Four, Five, Six, Seven, Eight, Nine, Ten, Jack, Queen, King]
                      , s <- [Spade, Heart, Diamond, Club]
                      ]
@@ -44,19 +46,20 @@ allCards = [Card s v | v <- [Ace, Two, Three, Four, Five, Six, Seven, Eight, Nin
 data Turn = Dealer | Player deriving Show
 
 data GameState = GameState
-    { dealerHand :: Hand
-    , playerHand :: [Hand]
-    , deck :: Deck
-    , whoseTurn :: Turn
-    , boughtInsurance :: Bool
+    { _dealerHand :: Hand
+    , _playerHand :: [Hand]
+    , _deck :: Deck
+    , _whoseTurn :: Turn
+    , _boughtInsurance :: Bool
     } deriving Show
+makeLenses ''GameState
 
 data GameAction
-    = Hit
-    | Stay
-    | DoubleDown
-    | Split
-    | Fold
+    = HitAction
+    | StayAction
+    | DoubleDownAction
+    | SplitAction
+    | FoldAction
     deriving (Eq, Read, Show)
 
 data Outcome
@@ -81,8 +84,7 @@ shuffledSingleDeck = return allCards
 
 fisherYates :: [a] -> State StdGen [a]
 fisherYates [] = return []
-fisherYates (x:xs) =
-    M.elems <$> foldM fisherYatesStep (initial x) (numerate xs)
+fisherYates (x:xs) = M.elems <$> foldM fisherYatesStep (initial x) (numerate xs)
     where
     numerate = zip [1..]
     initial k = M.singleton 0 k
@@ -143,6 +145,7 @@ drawCard = do
     (GameState dh ph d t ins) <- get
     case d of
         (c:cs) -> (put $ GameState dh ph cs t ins) >> (return $ Just c)
+        --(c:cs) -> (\_ -> Just c) <$> put $ GameState dh ph cs t ins
         [] -> return Nothing
 
 giveDealer :: StateT GameState IO (Maybe Card)
@@ -193,13 +196,13 @@ playPlayer = do
     playHand :: Hand -> StateT GameState IO Hand
     playHand h = do
         io . putStrLn $ "Playing hand " ++ (show h)
-        io $ putStr "Your move [Hit Stay DoubleDown Split Fold]> "
+        io $ putStr "Your move [HitAction StayAction DoubleDownAction SplitAction FoldAction]> "
         -- XXX read sucks. it can throw exceptions, which are unidiomatic.
         (read <$> io getLine) >>= processInput
         where
         processInput :: GameAction -> StateT GameState IO Hand
         processInput ga = case ga of
-            Hit -> do
+            HitAction -> do
                 mc <- drawCard
                 case mc of
                     Just c -> do
@@ -213,36 +216,35 @@ playPlayer = do
                     Nothing -> do
                         io . putStrLn $ "Deck ran out of cards!"
                         return h
-            Stay -> return h
-            DoubleDown -> do
+            StayAction -> return h
+            DoubleDownAction -> do
                 (GameState _ ph _ _ _) <- get
                 case canDoubleDown ph of
                     True -> do
-                        h' <- processInput Hit
+                        h' <- processInput HitAction
                         if h' == []
                             then return []
-                            else processInput Stay
+                            else processInput StayAction
                     False -> do
                         io $ putStrLn "Can't double down"
                         playHand h
-            Split -> do --TODO
+            SplitAction -> do --TODO how do we modify the structure being traversed?
                 (GameState _ ph _ _ _) <- get
                 case canSplit h of
                     True -> do
                         Just c1 <- drawCard
                         Just c2 <- drawCard
                         (GameState dh _ d t ins) <- get
-                        let sc = head h  -- despite head, this is safe becaause of canSplit
+                        let sc = head h  -- despite head, this is safe because of canSplit
                         let ph' = ph ++ [(sc:c2:[])]
                         put $ GameState dh ph' d t ins
                         return (sc:c1:[])
                     False -> do
                         io $ putStrLn "Can't split"
                         playHand h
-            Fold -> do
+            FoldAction -> do
                 io . putStrLn $ "The current hand " ++ (show h) ++ " loses."
                 return []
-            --_ -> (io . putStrLn $ "Invalid input " ++ (show ga)) >> playHand h
 
 play :: StateT GameState IO ()
 play = do
@@ -262,7 +264,6 @@ play = do
         case inp of
             "y" -> do (GameState dh ph cs t ins) <- get
                       put $ GameState dh ph cs t True
-                      return ()
             "n" -> return ()
             _ -> needsInsurance mc
     needsInsurance _ = return ()
