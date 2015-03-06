@@ -145,7 +145,6 @@ drawCard = do
     (GameState dh ph d t ins) <- get
     case d of
         (c:cs) -> (put $ GameState dh ph cs t ins) >> (return $ Just c)
-        --(c:cs) -> (\_ -> Just c) <$> put $ GameState dh ph cs t ins
         [] -> return Nothing
 
 giveDealer :: StateT GameState IO (Maybe Card)
