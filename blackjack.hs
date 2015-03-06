@@ -142,24 +142,27 @@ compareHands dh phs = let dhv = handValue dh in
 
 drawCard :: StateT GameState IO (Maybe Card)
 drawCard = do
-    (GameState dh ph d t ins) <- get
-    case d of
-        (c:cs) -> (put $ GameState dh ph cs t ins) >> (return $ Just c)
+    gs <- get
+    case (gs ^. deck) of
+        (c:cs) -> (put $ set deck cs gs) >> (return $ Just c)
         [] -> return Nothing
 
 giveDealer :: StateT GameState IO (Maybe Card)
 giveDealer = do
-    (GameState dh ph d t ins) <- get
-    case d of
-        (c:cs) -> (put $ GameState (c:dh) ph cs t ins) >> (return $ Just c)
-        [] -> return Nothing
+    mc <- drawCard
+    case mc of
+        Just c -> do
+            gs <- get
+            put $ set dealerHand (c:(gs ^. deck)) gs
+            return $ Just c
+        Nothing -> return Nothing
 
 playDealer :: StateT GameState IO ()
 playDealer = do
     c <- giveDealer
     io $ putStrLn ("Dealer got a " ++ (show c))
-    (GameState dh ph d t ins) <- get
-    case dealerStop dh of
+    gs <- get
+    let dh = gs ^. deck in case dealerStop dh of
         True -> case didExplode dh of
             True -> do io $ putStrLn "Dealer exploded! You win."
                        return ()
@@ -169,22 +172,23 @@ playDealer = do
     where
     dealerStop h = (handValue h) >= 17
 
--- XXX this is just for one hand
+-- this is just for one hand
 dealPlayer :: StateT GameState IO (Maybe Card)
 dealPlayer = do
-    (GameState dh ph d t ins) <- get
-    case d of
+    gs <- get
+    let ph = gs ^. playerHand
+        d = gs ^. deck in case d of
         (c:cs) -> case ph of
             [] -> return Nothing
-            (h:hs) -> (put $ GameState dh ((c:h):hs) cs t ins) >> (return $ Just c)
+            (h:hs) -> (put $ (set playerHand ((c:h):hs) . set deck cs) gs) >> (return $ Just c)
         [] -> return Nothing
 
 playPlayer :: StateT GameState IO ()
 playPlayer = do
-    (GameState _ ph _ _ _) <- get
-    ph' <- traverse playHand ph  --XXX still not sure how to append to ph
-    (GameState dh _ d t ins) <- get
-    put $ GameState dh ph' d t ins
+    gs <- get
+    ph' <- traverse playHand (gs ^. playerHand)  --XXX still not sure how to append to ph during traverse
+    gs <- get
+    put $ set playerHand ph' gs
     case all (== []) ph' of
         True -> do
             io $ putStrLn "Player lost. Dealer wins!"
@@ -217,8 +221,8 @@ playPlayer = do
                         return h
             StayAction -> return h
             DoubleDownAction -> do
-                (GameState _ ph _ _ _) <- get
-                case canDoubleDown ph of
+                gs <- get
+                let ph = gs ^. playerHand in case canDoubleDown ph of
                     True -> do
                         h' <- processInput HitAction
                         if h' == []
@@ -228,15 +232,15 @@ playPlayer = do
                         io $ putStrLn "Can't double down"
                         playHand h
             SplitAction -> do --TODO how do we modify the structure being traversed?
-                (GameState _ ph _ _ _) <- get
-                case canSplit h of
+                gs <- get
+                let ph = gs ^. playerHand in case canSplit h of
                     True -> do
                         Just c1 <- drawCard
                         Just c2 <- drawCard
-                        (GameState dh _ d t ins) <- get
+                        gs <- get
                         let sc = head h  -- despite head, this is safe because of canSplit
                         let ph' = ph ++ [(sc:c2:[])]
-                        put $ GameState dh ph' d t ins
+                        put $ set playerHand ph' gs
                         return (sc:c1:[])
                     False -> do
                         io $ putStrLn "Can't split"
@@ -261,8 +265,7 @@ play = do
         io $ putStr "Do you want insurance? (y/n)> "
         inp <- io getLine
         case inp of
-            "y" -> do (GameState dh ph cs t ins) <- get
-                      put $ GameState dh ph cs t True
+            "y" -> get >>= put . set boughtInsurance True
             "n" -> return ()
             _ -> needsInsurance mc
     needsInsurance _ = return ()
