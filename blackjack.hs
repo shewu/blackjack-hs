@@ -144,7 +144,7 @@ drawCard :: StateT GameState IO (Maybe Card)
 drawCard = do
     gs <- get
     case (gs ^. deck) of
-        (c:cs) -> (put $ set deck cs gs) >> (return $ Just c)
+        (c:cs) -> (deck .= cs) >> (return $ Just c)
         [] -> return Nothing
 
 giveDealer :: StateT GameState IO (Maybe Card)
@@ -153,7 +153,7 @@ giveDealer = do
     case mc of
         Just c -> do
             gs <- get
-            put $ set dealerHand (c:(gs ^. deck)) gs
+            dealerHand .= (c:(gs ^. deck))
             return $ Just c
         Nothing -> return Nothing
 
@@ -180,7 +180,10 @@ dealPlayer = do
         d = gs ^. deck in case d of
         (c:cs) -> case ph of
             [] -> return Nothing
-            (h:hs) -> (put $ (set playerHand ((c:h):hs) . set deck cs) gs) >> (return $ Just c)
+            (h:hs) -> do
+                playerHand .= ((c:h):hs)
+                deck .= cs
+                return $ Just c
         [] -> return Nothing
 
 playPlayer :: StateT GameState IO ()
@@ -188,7 +191,7 @@ playPlayer = do
     gs <- get
     ph' <- traverse playHand (gs ^. playerHand)  --XXX still not sure how to append to ph during traverse
     gs <- get
-    put $ set playerHand ph' gs
+    playerHand .= ph'
     case all (== []) ph' of
         True -> do
             io $ putStrLn "Player lost. Dealer wins!"
@@ -240,7 +243,7 @@ playPlayer = do
                         gs <- get
                         let sc = head h  -- despite head, this is safe because of canSplit
                         let ph' = ph ++ [(sc:c2:[])]
-                        put $ set playerHand ph' gs
+                        playerHand .= ph'
                         return (sc:c1:[])
                     False -> do
                         io $ putStrLn "Can't split"
@@ -265,7 +268,7 @@ play = do
         io $ putStr "Do you want insurance? (y/n)> "
         inp <- io getLine
         case inp of
-            "y" -> get >>= put . set boughtInsurance True
+            "y" -> get >> (boughtInsurance .= True)
             "n" -> return ()
             _ -> needsInsurance mc
     needsInsurance _ = return ()
